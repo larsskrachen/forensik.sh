@@ -1,0 +1,136 @@
+services:
+  forensics-target:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: forensics-target
+    hostname: forensics-target
+    restart: unless-stopped
+
+    networks:
+      frontend-net:
+        ipv4_address: 172.20.1.10
+      backend-net:
+        ipv4_address: 172.20.2.10
+
+    ports:
+      - "8090:80"      # Web-Interface
+      - "8091:8080"    # Nginx-Debug-Interface
+      - "2222:22"      # SSH-Zugang (Backdoor offen)
+
+    volumes:
+      - app-logs:/var/log
+      - upload-data:/var/www/html/upload
+
+    environment:
+      DB_HOST: forensics-db
+      DB_PORT: "3306"
+      DB_NAME: shopdb
+      DB_USER: root
+      DB_PASSWORD: MySuperSecretDBPass123!
+      REDIS_HOST: forensics-redis
+      REDIS_PASSWORD: RedisP@ss2024!
+      API_KEY: sk-prod-a7f3h2k9m1p4r8t6v0x2z5b8n1
+      JWT_SECRET: eyJhbGciOiJIUzI1NiJ9.FORENSIC_DEMO_SECRET
+      APP_ENV: production
+      DEBUG: "true"
+
+    depends_on:
+      forensics-db:
+        condition: service_healthy
+
+    # FORENSIK-ARTEFAKT: privilegierter Container
+    # docker inspect zeigt Capabilities-Konfiguration
+    cap_add:
+      - NET_ADMIN
+      - SYS_PTRACE
+
+    labels:
+      forensic.role: "target"
+      forensic.scenario: "compromised-webserver"
+      forensic.iocs: "webshell,backdoor-user,suid-binary,crontab,hardcoded-secrets"
+      maintainer: "forensics-demo"
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # FORENSICS DATABASE: MariaDB mit Kunden-Daten
+  # ─────────────────────────────────────────────────────────────────────────
+  forensics-db:
+    image: mariadb:10.11
+    container_name: forensics-db
+    hostname: forensics-db
+    restart: unless-stopped
+
+    networks:
+      backend-net:
+        ipv4_address: 172.20.2.20
+
+    ports:
+      - "3366:3306"
+
+    volumes:
+      - db-data:/var/lib/mysql
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+
+    environment:
+      MYSQL_ROOT_PASSWORD: MySuperSecretDBPass123!
+      MYSQL_DATABASE: shopdb
+      MYSQL_USER: appuser
+      MYSQL_PASSWORD: AppUser#2024
+
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+    labels:
+      forensic.role: "database"
+      forensic.data: "customer-records,payment-data,audit-log"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# NETZWERKE
+# ─────────────────────────────────────────────────────────────────────────────
+networks:
+  frontend-net:
+    name: forensic-frontend
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.1.0/24
+          gateway: 172.20.1.1
+    labels:
+      forensic.network: "frontend"
+      forensic.purpose: "web-traffic"
+
+  backend-net:
+    name: forensic-backend
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.2.0/24
+          gateway: 172.20.2.1
+    labels:
+      forensic.network: "backend"
+      forensic.purpose: "database-traffic"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# VOLUMES
+# ─────────────────────────────────────────────────────────────────────────────
+volumes:
+  db-data:
+    name: forensic-db-data
+    labels:
+      forensic.evidence: "database-files"
+      forensic.priority: "high"
+
+  app-logs:
+    name: forensic-app-logs
+    labels:
+      forensic.evidence: "application-logs"
+      forensic.priority: "high"
+
+  upload-data:
+    name: forensic-upload-data
+    labels:
+      forensic.evidence: "uploaded-files-webshell"
+      forensic.priority: "critical"
